@@ -2,7 +2,7 @@
 
 ## 1. 文档用途
 
-本文记录 Windows 版 Codex 中 **Browser / Chrome / Computer Use** 插件不可用的一次完整修复过程。目标不是记录所有尝试，而是保留复发后真正有用的判断顺序、关键日志、修复边界和可复用提示词。
+本文记录 Windows 版 Codex 中 **Browser / Chrome / Computer Use** 插件不可用的一次完整修复过程。目标是保留复发后有用的判断顺序、关键日志、修复边界和可复用提示词。
 
 适用情况：
 
@@ -35,7 +35,7 @@ OpenAI 账号或订阅权限问题
 Windows 版 Codex / Microsoft Store / MSIX 包中的本地运行时文件迁移失败。
 ```
 
-更具体地说，Codex 需要把 WindowsApps 中的内置执行文件迁移到用户目录，但因 WindowsApps 文件带有特殊保护或加密属性，普通复制失败，导致多个 helper 缺失：
+进一步导致多个 helper 缺失或路径错误：
 
 ```text
 node_repl.exe
@@ -46,7 +46,7 @@ codex-windows-sandbox-setup.exe
 codex-command-runner.exe
 ```
 
-进一步导致：
+进一步表现为：
 
 ```text
 mcp__node_repl__js 缺失
@@ -60,7 +60,7 @@ Browser / Chrome / Computer Use 工具无法注入当前线程
 ```text
 Chrome 成功打开 openai.com
 页面标题读取正常：OpenAI | Research & Deployment
-Computer Use / Browser / Chrome 工具链恢复
+Browser / Chrome / Computer Use 工具链恢复
 ```
 
 ---
@@ -123,27 +123,23 @@ nodeRepl.config 权限桥
 
 ## 5. 复发后优先阅读
 
-1. 先看 `docs/03-复发快速处理.md`
-2. 再运行 `scripts/check-codex-runtime.ps1`
-3. 把 `prompts/复发后给Codex的修复提示词.md` 复制给 Codex
-4. 只在路径确认后使用 `scripts/copy-plain-file-template.ps1`
+1. 先看 `docs/03-复发快速处理.md`。
+2. 再运行 `scripts/check-codex-runtime.ps1`。
+3. 把 `prompts/复发后给Codex的修复提示词.md` 复制给 Codex。
+4. 路径确认后再执行实际修复。
 
 ---
 
-## 6. 安全边界
-
-修复时坚持：
+## 6. 修复边界
 
 ```text
-不取得 WindowsApps 所有权
-不关闭 Defender
-不执行 cipher /d
 不删除 %USERPROFILE%\.codex
 不删除项目文件
 不删除 Chrome / Edge 用户数据
-所有覆盖前必须备份
+不保存完整日志或截图到 public 仓库
+所有覆盖前先备份
 先 dry-run，确认路径后再执行
-复制 WindowsApps 文件时使用文件流复制，不用 Copy-Item / robocopy
+复发后重新读取最新 RuntimePaths，不复用旧 hash
 ```
 
 ---
