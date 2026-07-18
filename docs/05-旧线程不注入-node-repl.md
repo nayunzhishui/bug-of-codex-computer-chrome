@@ -78,10 +78,18 @@ copy "$env:USERPROFILE\.codex\config.toml" `
   "$env:USERPROFILE\.codex\config.toml.bak_node_repl_$(Get-Date -Format yyyyMMddHHmmss)"
 ```
 
-添加显式 `node_repl` MCP server：
+添加显式 `node_repl` MCP server。必须同时提供匹配的 CLI 与模块目录：
 
 ```powershell
-codex mcp add node_repl -- "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
+$codexCli = "$env:LOCALAPPDATA\OpenAI\Codex\bin\codex.exe"
+$nodeRepl = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
+$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<当前版本>\bin\node_modules"
+
+codex mcp add node_repl `
+  --env CODEX_CLI_PATH=$codexCli `
+  --env CODEX_HOME="$env:USERPROFILE\.codex" `
+  --env NODE_REPL_NODE_MODULE_DIRS=$mods `
+  -- $nodeRepl
 ```
 
 复验：
@@ -106,6 +114,7 @@ MCP configuration is locally consistent
 ```text
 当前 turn 的工具表一般不会热加载。
 修复后需要新 turn、新线程或完全重启 Codex 后复测。
+显式 MCP 恢复工具入口，不代表受信任授权桥已经恢复。
 ```
 
 复测方式：
@@ -129,5 +138,6 @@ mcp__node_repl__js
 不要删除 Chrome 用户数据
 不要反复重装 Chrome 扩展
 不要把运行时已存在的问题误判为 node-repl-missing
+不要在出现 elicitations unavailable 时伪造审批或自动接受
 不要在 public 仓库记录完整 state DB、完整会话日志或真实用户路径
 ```

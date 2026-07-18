@@ -69,6 +69,8 @@ codex --version
 
 则说明 Codex Desktop 仍在使用旧内置运行时。即使 `codex plugin list` 显示插件 enabled，新线程仍可能用旧工具注入逻辑启动。
 
+还要继续检查当前 MSIX 的 `cua_node\manifest.json`。即使 CLI 已更新，顶层 `node_repl.exe` 仍可能是旧文件，而 `NODE_REPL_NODE_MODULE_DIRS` 指向另一套旧 runtime。这会形成“工具已出现但授权桥仍失败”的下一层问题。
+
 ---
 
 ## 修复方向
@@ -76,9 +78,9 @@ codex --version
 ### 1. 恢复显式 node_repl MCP
 
 ```powershell
-$codexCli = "$env:APPDATA\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe"
+$codexCli = "$env:LOCALAPPDATA\OpenAI\Codex\bin\codex.exe"
 $nodeRepl = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
-$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<CuaFingerprint>\bin\node_modules"
+$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<当前manifest版本>\bin\node_modules"
 
 codex mcp remove node_repl
 codex mcp add node_repl `
@@ -90,7 +92,9 @@ codex mcp add node_repl `
 codex mcp get node_repl
 ```
 
-`<CuaFingerprint>` 必须从本机最新 runtime 目录读取，不要复用旧值。
+`<当前manifest版本>` 必须从当前 `OpenAI.Codex` MSIX 的 `app\resources\cua_node\manifest.json` 读取，不要复用旧值。
+
+注意：显式 MCP 只证明工具入口可以被发现。如果后续出现 `elicitations are unavailable`，转到 `07-授权已开启但-Computer-Use-仍失败.md`，不要把它误判为设置页没有允许。
 
 ---
 
@@ -125,6 +129,15 @@ codex-windows-sandbox-setup.exe
 必须完全退出 ChatGPT.exe、codex.exe、codex-code-mode-host.exe 后再复制。
 ```
 
+推荐先 dry-run，再使用仓库脚本同步 CLI 和匹配的 CUA 运行时：
+
+```powershell
+.\scripts\repair-codex-runtime-skew.ps1
+.\scripts\repair-codex-runtime-skew.ps1 -Apply
+```
+
+WindowsApps 源文件带特殊属性时，普通复制可能出现错误 6000。脚本只复制数据和时间戳，不继承加密属性。
+
 ---
 
 ## 复验
@@ -149,6 +162,8 @@ cli_version 不再是旧版
 出现 mcp: node_repl/js started
 不再出现“无法连接 Chrome 控制组件”
 ```
+
+如果 `node_repl/js` 已启动，但 Computer Use 仍报授权弹窗不可用，说明工具注入已修复、授权桥尚未修复，应继续检查 `node_repl` 与 CUA runtime 是否同版本。
 
 ---
 
