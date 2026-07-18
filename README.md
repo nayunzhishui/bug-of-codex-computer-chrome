@@ -110,7 +110,8 @@ nodeRepl.config 权限桥
 │   ├── 02-关键修复流程.md
 │   ├── 03-复发快速处理.md
 │   ├── 04-日志关键词表.md
-│   └── 05-旧线程不注入-node-repl.md
+│   ├── 05-旧线程不注入-node-repl.md
+│   └── 06-新线程仍不注入-node-repl.md
 ├── prompts/
 │   └── 复发后给Codex的修复提示词.md
 ├── scripts/
@@ -128,7 +129,8 @@ nodeRepl.config 权限桥
 2. 再运行 `scripts/check-codex-runtime.ps1`。
 3. 把 `prompts/复发后给Codex的修复提示词.md` 复制给 Codex。
 4. 如果运行时都存在但旧线程仍没有 `mcp__node_repl__js`，看 `docs/05-旧线程不注入-node-repl.md`。
-5. 路径确认后再执行实际修复。
+5. 如果新建线程仍没有 `mcp__node_repl__js`，看 `docs/06-新线程仍不注入-node-repl.md`。
+6. 路径确认后再执行实际修复。
 
 ---
 
