@@ -150,6 +150,7 @@ nodeRepl.config 权限桥
 ├── scripts/
 │   ├── check-codex-runtime.ps1
 │   ├── copy-plain-file-template.ps1
+│   ├── repair-chrome-app-server-registry.ps1
 │   └── repair-codex-runtime-skew.ps1
 └── logs-examples/
     └── README.md
@@ -169,6 +170,14 @@ nodeRepl.config 权限桥
 8. 检查诊断报告中的 `Desktop core alignment`，任何 `MISMATCH` 都必须先修复。
 9. 检查 `Chrome app-server registry`；出现 `No compatible Codex app-server entry was found` 时先修复该层。
 10. 路径确认后先 dry-run，再执行实际修复。
+
+若只出现 `No compatible Codex app-server entry was found`，可在完全退出 Codex 后单独运行：
+
+```powershell
+.\scripts\repair-chrome-app-server-registry.ps1
+```
+
+该脚本只备份 `chrome-native-hosts-v2.json`、重开 Codex 并等待兼容活跃条目，不修改 `config.toml`、插件、注册表或 WindowsApps 权限。最终结果写入桌面的 `codex-chrome-app-server-repair-result.txt`。
 
 ---
 
