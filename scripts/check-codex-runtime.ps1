@@ -86,6 +86,30 @@ Add-FileEvidence -Label 'Local node_repl' -Path $localNodeRepl
 Add-FileEvidence -Label 'Local codex' -Path $localCodex
 Add-ReportLine
 
+Add-ReportLine '=== Desktop core alignment ==='
+if ($null -eq $package) {
+  Add-ReportLine 'SKIPPED: current MSIX package is unavailable.'
+} else {
+  $resources = Join-Path $package.InstallLocation 'app\resources'
+  foreach ($name in @('codex.exe', 'codex-code-mode-host.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe')) {
+    $source = Join-Path $resources $name
+    $target = Join-Path $localBin $name
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+      Add-ReportLine "${name} source: MISSING | $source"
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+      Add-ReportLine "${name} local: MISSING | $target"
+      continue
+    }
+    $sourceHash = Get-Sha256 -Path $source
+    $targetHash = Get-Sha256 -Path $target
+    $status = if ($sourceHash -eq $targetHash) { 'MATCH' } else { 'MISMATCH' }
+    Add-ReportLine "${name}: $status | MSIX=$sourceHash | local=$targetHash"
+  }
+}
+Add-ReportLine
+
 Add-ReportLine '=== Bundled plugin versions ==='
 if ($null -ne $package) {
   $bundledMarketplaceSource = Join-Path $package.InstallLocation 'app\resources\plugins\openai-bundled'

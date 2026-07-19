@@ -29,7 +29,7 @@ OpenAI 账号或订阅权限问题
 
 ## 2. 最终结论
 
-复盘后确认，这不是一个单点故障，而是可能连续出现的八层故障链：
+复盘后确认，这不是一个单点故障，而是可能连续出现的九层故障链：
 
 ```text
 1. openai-bundled / Chrome Native Host 没有加载或注册
@@ -40,6 +40,7 @@ OpenAI 账号或订阅权限问题
 6. Google Chrome 实际未运行，仅 Edge 在运行，导致 extension 后端不可用
 7. Computer Use 需要逐应用授权，但 createElicitation/nativePipe 授权桥没有注入
 8. Codex 已更新，但 openai-bundled marketplace 和插件缓存仍停留在旧版本
+9. 修复脚本把 npm CLI 的 codex.exe / code-mode-host 写入 Desktop bin，导致可信安全桥缺失
 ```
 
 早期故障确实来自 MSIX 本地运行时迁移失败，导致多个 helper 缺失或路径错误：
@@ -63,6 +64,8 @@ Browser security unavailable outside node repl
 它表示设置页权限可能已经开启，但当前任务缺少官方可信上下文。修复时应删除这个旧的外部 MCP workaround，刷新当前 MSIX 自带的 `openai-bundled` marketplace，并重新安装同版本 Chrome / Computer Use 插件；不能通过自动接受审批来绕过。
 
 本次复发还确认了一个明确版本错配：Codex 包已经更新到 `26.707.9981.0`，包内 Chrome / Computer Use 插件为 `26.707.72221`，但活动 marketplace、插件缓存和 Native Host 仍停留在 `26.616.71553`。插件 UI 的 `installed, enabled` 不能证明插件版本与当前 Codex 一致。
+
+进一步复测发现，即使 npm CLI 与 Desktop CLI 都显示 `0.144.5`，二者的 `codex.exe` 和 `codex-code-mode-host.exe` 仍可能具有不同 SHA-256。Desktop 若误用 npm 版核心文件，`mcp__node_repl__js` 可能先出现，但导航时因缺少 `nodeRepl.config.createElicitation` 报 `Browser security unavailable outside node repl`，之后工具入口从同一任务中消失。Desktop 核心文件必须优先来自当前 MSIX；npm 只能作为 MSIX 缺文件时的兜底。
 
 Chrome 显示 `Connected`、能够读取标签页，但导航被安全层拦截，是另一类问题。先用用户明确给出的完整 URL 复测，不要把安全策略误判为扩展断连，也不要修改代码绕过浏览器安全层。
 
@@ -157,7 +160,8 @@ nodeRepl.config 权限桥
 5. 如果新建线程仍没有 `mcp__node_repl__js`，看 `docs/06-新线程仍不注入-node-repl.md`。
 6. 如果报错包含 `elicitations are unavailable`，看 `docs/07-授权已开启但-Computer-Use-仍失败.md`。
 7. 如果 Codex 已更新但插件仍旧，或出现 `outside node repl`，看 `docs/08-Codex更新后插件缓存仍是旧版.md`。
-8. 路径确认后先 dry-run，再执行实际修复。
+8. 检查诊断报告中的 `Desktop core alignment`，任何 `MISMATCH` 都必须先修复。
+9. 路径确认后先 dry-run，再执行实际修复。
 
 ---
 

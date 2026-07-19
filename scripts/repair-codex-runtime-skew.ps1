@@ -226,9 +226,14 @@ if ($nodeVersion -ne "v$($manifest.node_version)") {
 & $runtimeNodeRepl --help | Out-Null
 
 foreach ($name in @('codex.exe', 'codex-code-mode-host.exe', 'codex-command-runner.exe', 'codex-windows-sandbox-setup.exe')) {
-  $source = Join-Path $npmVendorBin $name
+  # The Desktop app-server and its code-mode host must come from the same MSIX
+  # build as the bundled CUA runtime.  An npm CLI can report the same semantic
+  # version while containing different binaries and no trusted Desktop bridge.
+  $source = Join-Path $resources $name
+  $sourceKind = 'current MSIX'
   if (-not (Test-Path -LiteralPath $source)) {
-    $source = Join-Path $resources $name
+    $source = Join-Path $npmVendorBin $name
+    $sourceKind = 'npm fallback'
   }
   if (-not (Test-Path -LiteralPath $source)) {
     Write-Warning "missing helper source: $name"
@@ -236,10 +241,14 @@ foreach ($name in @('codex.exe', 'codex-code-mode-host.exe', 'codex-command-runn
   }
   $target = Join-Path $localBin $name
   if ((Test-Path -LiteralPath $target) -and (Get-Sha256 $source) -eq (Get-Sha256 $target)) {
-    Write-Output "already current $target"
+    Write-Output "already current $target ($sourceKind)"
     continue
   }
   Copy-PlainFile -Source $source -Target $target
+  if ((Get-Sha256 $source) -ne (Get-Sha256 $target)) {
+    throw "Desktop helper verification failed: $target"
+  }
+  Write-Output "source ${sourceKind}: $source"
 }
 
 if (

@@ -8,6 +8,7 @@ Chrome / Computer Use 显示 installed, enabled
 新任务仍无法控制浏览器
 日志出现 Browser security unavailable outside node repl
 或普通 node_repl MCP 在重启后消失
+或工具在同一任务内先可调用、随后变成 not a function
 ```
 
 ## 已复现根因
@@ -36,6 +37,8 @@ Browser security unavailable outside node repl
 Computer Use requires app approval but elicitations are unavailable
 ```
 
+本次继续定位到另一种会产生相同表象的版本错配：修复脚本曾优先把 npm 安装目录中的 `codex.exe` 与 `codex-code-mode-host.exe` 复制到 Desktop bin。即使两边都显示同一个 CLI 版本，二进制 SHA-256 仍不同。结果是插件技能和执行工具一度可见，但 Desktop 专用的可信安全桥没有正确注入。
+
 ## 排查顺序
 
 1. 用 `Get-AppxPackage OpenAI.Codex` 找到当前 MSIX。
@@ -44,7 +47,8 @@ Computer Use requires app approval but elicitations are unavailable
 4. 读取 `%USERPROFILE%\.codex\plugins\cache\openai-bundled` 的版本。
 5. 检查 Native Host manifest 当前指向哪个版本。
 6. 执行 `codex mcp get node_repl`，确认是否还存在旧的外部 workaround。
-7. 最后查对应任务日志，而不是只看 UI 提示。
+7. 比较当前 MSIX `app\resources` 与 `%LOCALAPPDATA%\OpenAI\Codex\bin` 中 `codex.exe`、`codex-code-mode-host.exe` 的 SHA-256。
+8. 最后查对应任务日志，而不是只看 UI 提示。
 
 仓库的诊断脚本会输出上述版本：
 
@@ -58,11 +62,12 @@ Computer Use requires app approval but elicitations are unavailable
 2. 停止已核实属于 Codex Chrome 插件的旧 `extension-host.exe` 进程树。
 3. 停止已核实属于 VS Code OpenAI 扩展、且仍在运行 `app-server` 的遗留 `codex.exe`；不关闭 VS Code 本身。
 4. 从当前 MSIX 刷新活动 `openai-bundled` marketplace。
-5. 删除旧的外部 `node_repl` MCP workaround。
-6. 重新安装当前版本的 Chrome / Computer Use bundled 插件。
-7. 把 Native Host manifest 和 Chrome/Edge 注册表指向新版本插件缓存。
-8. 同步当前 CUA runtime 和 notifier。
-9. 重新打开 Codex，新建任务验证。
+5. 从当前 MSIX（不是 npm CLI）同步 Desktop 的 `codex.exe`、`codex-code-mode-host.exe` 和 helper，并校验 SHA-256。
+6. 删除旧的外部 `node_repl` MCP workaround。
+7. 重新安装当前版本的 Chrome / Computer Use bundled 插件。
+8. 把 Native Host manifest 和 Chrome/Edge 注册表指向新版本插件缓存。
+9. 同步当前 CUA runtime 和 notifier。
+10. 重新打开 Codex，新建任务验证。
 
 先 dry-run：
 
@@ -80,6 +85,7 @@ Computer Use requires app approval but elicitations are unavailable
 
 ```text
 MSIX 内插件版本 = 活动 marketplace 版本 = 已安装缓存版本
+Desktop core alignment 全部为 MATCH
 Native Host path 指向该版本缓存
 codex mcp get node_repl 返回未配置外部 server
 新任务实际获得官方 node_repl js 工具
