@@ -10,7 +10,7 @@ Chrome 扩展侧不再提示 manifest missing
 但 @chrome 仍回复：无法连接 Chrome 控制组件
 ```
 
-这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建，或 `config.toml` 在重启后被旧进程快照覆盖，导致 `node_repl` 没有进入该线程工具表。
+这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建、活动 bundled marketplace 仍是旧版，或配置被旧进程快照覆盖，导致官方可信工具没有进入该线程工具表。
 
 ---
 
@@ -99,33 +99,28 @@ Get-CimInstance Win32_Process |
 
 如果 `extension-host.exe` 明显早于本次应用启动，或路径仍指向 `.codex\.tmp\bundled-marketplaces`，先停止已核实的旧宿主进程链，再写入 MCP 配置。不要先写配置再退出旧进程，否则旧进程仍可能把 `config.toml` 覆盖回去。
 
-仓库脚本的 `-Apply` 流程会在确认 ChatGPT 已退出后：
+仓库脚本的 `-Apply` 流程会在确认 Codex、Chrome 和 Edge 已退出后：
 
-1. 把 Native Host 清单切到当前插件缓存的稳定路径；
-2. 停止已核实属于 Codex Chrome 插件的旧宿主及其子进程；
+1. 停止已核实属于 Codex Chrome 插件的旧宿主及其子进程；
+2. 从当前 MSIX 刷新 bundled marketplace；
 3. 同步当前 MSIX 的 CLI、`node_repl` 和 CUA runtime；
-4. 最后写入 `node_repl` MCP 和当前版本的 Computer Use notifier。
+4. 删除会遮蔽可信上下文的旧外部 `node_repl` MCP；
+5. 重装当前版本 Chrome / Computer Use 插件；
+6. 最后把 Native Host 和 notifier 指向当前版本。
 
-### 1. 恢复显式 node_repl MCP
+### 1. 比较并刷新 bundled 插件版本
 
 ```powershell
-$codexCli = "$env:LOCALAPPDATA\OpenAI\Codex\bin\codex.exe"
-$nodeRepl = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
-$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<当前manifest版本>\bin\node_modules"
-
-codex mcp remove node_repl
-codex mcp add node_repl `
-  --env CODEX_CLI_PATH=$codexCli `
-  --env CODEX_HOME="$env:USERPROFILE\.codex" `
-  --env NODE_REPL_NODE_MODULE_DIRS=$mods `
-  -- $nodeRepl
-
-codex mcp get node_repl
+$package = Get-AppxPackage OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
+$msixPlugin = Join-Path $package.InstallLocation 'app\resources\plugins\openai-bundled\plugins\chrome\.codex-plugin\plugin.json'
+$activePlugin = "$env:USERPROFILE\.codex\.tmp\bundled-marketplaces\openai-bundled\plugins\chrome\.codex-plugin\plugin.json"
+(Get-Content $msixPlugin -Raw | ConvertFrom-Json).version
+(Get-Content $activePlugin -Raw | ConvertFrom-Json).version
 ```
 
-`<当前manifest版本>` 必须从当前 `OpenAI.Codex` MSIX 的 `app\resources\cua_node\manifest.json` 读取，不要复用旧值。
+两者不同就属于已确认故障。使用仓库 repair 脚本刷新，不要手工添加普通外部 `node_repl` MCP。
 
-注意：显式 MCP 只证明工具入口可以被发现。如果后续出现 `elicitations are unavailable`，转到 `07-授权已开启但-Computer-Use-仍失败.md`，不要把它误判为设置页没有允许。
+注意：显式 MCP 只证明工具入口可以被发现。出现 `Browser security unavailable outside node repl` 或 `elicitations are unavailable` 时，应删除该 workaround，并转到 `08-Codex更新后插件缓存仍是旧版.md`。
 
 ---
 

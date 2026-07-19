@@ -30,7 +30,7 @@ Desktop 本地 codex.exe：0.144.0
 当前 MSIX manifest：node_repl 20260713.2
 ```
 
-为了恢复工具入口而显式注册的 `node_repl` stdio MCP 可以让 `mcp__node_repl__js` 再次出现，但旧 `node_repl`、旧 CLI 或不匹配的 `node_modules` 仍可能缺少受信任桌面桥：
+为了恢复工具入口而显式注册的 `node_repl` stdio MCP 可以让 `mcp__node_repl__js` 再次出现，但它本身不具备官方可信桌面桥；旧插件、旧 CLI 或不匹配的 `node_modules` 会进一步放大问题：
 
 ```text
 nodeRepl.config
@@ -98,13 +98,13 @@ Get-FileHash $bundled, $local -Algorithm SHA256
 
 若大小或 SHA-256 不同，说明顶层 `node_repl` 仍是旧副本。
 
-### 5. 检查 MCP 是否指向匹配的模块目录
+### 5. 检查是否存在外部 MCP workaround
 
 ```powershell
 codex mcp get node_repl
 ```
 
-`CODEX_CLI_PATH`、`node_repl.exe`、`NODE_REPL_NODE_MODULE_DIRS` 应来自同一套已验证运行时，不要混用旧 fingerprint 与新 CLI。
+若命令成功返回手工配置，应把它视为待移除的旧 workaround，而不是成功标志。随后比较当前 MSIX、活动 marketplace 与插件缓存版本。
 
 ---
 
@@ -116,7 +116,7 @@ codex mcp get node_repl
 .\scripts\repair-codex-runtime-skew.ps1
 ```
 
-确认路径后，完全退出 Codex/ChatGPT，再执行：
+确认路径后，完全退出 Codex/ChatGPT、Chrome 和 Edge，再执行：
 
 ```powershell
 .\scripts\repair-codex-runtime-skew.ps1 -Apply
@@ -127,8 +127,9 @@ codex mcp get node_repl
 1. 从当前 `OpenAI.Codex` MSIX manifest 动态读取 CUA 版本。
 2. 用 `robocopy /COPY:DT /DCOPY:T` 复制文件内容，避免继承 WindowsApps 加密属性导致错误 6000。
 3. 同步匹配的 `node_repl.exe` 与 `node_modules`。
-4. 同步 Desktop CLI helper，并重新注册带完整环境变量的 `node_repl` MCP。
-5. 保留覆盖前备份并要求重启后新建任务复测。
+4. 删除旧外部 `node_repl` MCP，刷新当前 MSIX bundled marketplace。
+5. 重装同版本 Chrome / Computer Use 插件，并把 Native Host 指向新缓存。
+6. 保留覆盖前备份并要求重启后新建任务复测。
 
 ---
 

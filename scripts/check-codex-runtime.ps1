@@ -71,12 +71,41 @@ Add-FileEvidence -Label 'Local node_repl' -Path $localNodeRepl
 Add-FileEvidence -Label 'Local codex' -Path $localCodex
 Add-ReportLine
 
-Add-ReportLine '=== node_repl MCP ==='
+Add-ReportLine '=== Bundled plugin versions ==='
+if ($null -ne $package) {
+  $bundledMarketplaceSource = Join-Path $package.InstallLocation 'app\resources\plugins\openai-bundled'
+  $bundledMarketplaceTarget = Join-Path $env:USERPROFILE '.codex\.tmp\bundled-marketplaces\openai-bundled'
+  foreach ($pluginName in @('chrome', 'computer-use')) {
+    $sourceManifest = Join-Path $bundledMarketplaceSource "plugins\$pluginName\.codex-plugin\plugin.json"
+    $targetManifest = Join-Path $bundledMarketplaceTarget "plugins\$pluginName\.codex-plugin\plugin.json"
+    foreach ($candidate in @(
+      @{ Label = 'MSIX'; Path = $sourceManifest },
+      @{ Label = 'active marketplace'; Path = $targetManifest }
+    )) {
+      if (Test-Path -LiteralPath $candidate.Path) {
+        $pluginManifest = Get-Content -LiteralPath $candidate.Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        Add-ReportLine "$pluginName $($candidate.Label): version=$($pluginManifest.version) | $($candidate.Path)"
+      } else {
+        Add-ReportLine "$pluginName $($candidate.Label): MISSING | $($candidate.Path)"
+      }
+    }
+    $cacheRoot = Join-Path $env:USERPROFILE ".codex\plugins\cache\openai-bundled\$pluginName"
+    $cacheVersions = @(Get-ChildItem -LiteralPath $cacheRoot -Directory -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending |
+      ForEach-Object { $_.Name })
+    Add-ReportLine "$pluginName installed cache: $($cacheVersions -join ', ')"
+  }
+}
+Add-ReportLine
+
+Add-ReportLine '=== Legacy external node_repl MCP ==='
 if (Test-Path -LiteralPath $localCodex) {
-  try {
-    (& $localCodex mcp get node_repl 2>&1) | ForEach-Object { Add-ReportLine $_ }
-  } catch {
-    Add-ReportLine "node_repl MCP unavailable: $($_.Exception.Message)"
+  $legacyMcpOutput = @(& $localCodex mcp get node_repl 2>&1)
+  if ($LASTEXITCODE -eq 0) {
+    Add-ReportLine 'WARNING: external node_repl is configured. It may expose js without the trusted browser/approval bridge.'
+    $legacyMcpOutput | ForEach-Object { Add-ReportLine $_ }
+  } else {
+    Add-ReportLine 'Absent (expected when the official bundled plugin supplies the trusted tool).'
   }
 }
 Add-ReportLine
@@ -134,6 +163,8 @@ $patterns = @(
   'TypeError: tools.mcp__node_repl__js is not a function',
   'Computer Use requires app approval but elicitations are unavailable',
   'Computer Use app approval UI is unavailable outside trusted node_repl',
+  'Browser security unavailable outside node repl',
+  'stream disconnected before completion',
   '无法连接 Chrome 控制组件',
   '浏览器安全层拦截'
 )

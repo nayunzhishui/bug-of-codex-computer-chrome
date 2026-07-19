@@ -61,7 +61,7 @@ sqlite3 "$env:USERPROFILE\.codex\state_5.sqlite" `
   "select count(*) from thread_dynamic_tools;"
 ```
 
-确认当前 MCP 配置：
+确认是否存在旧的外部 MCP workaround：
 
 ```powershell
 codex mcp list
@@ -71,40 +71,36 @@ codex mcp list
 
 ## 修复步骤
 
-先备份配置：
+先比较当前 MSIX 与活动 bundled marketplace 的插件版本：
 
 ```powershell
-copy "$env:USERPROFILE\.codex\config.toml" `
-  "$env:USERPROFILE\.codex\config.toml.bak_node_repl_$(Get-Date -Format yyyyMMddHHmmss)"
+$package = Get-AppxPackage OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
+$msixPlugin = Join-Path $package.InstallLocation 'app\resources\plugins\openai-bundled\plugins\chrome\.codex-plugin\plugin.json'
+$activePlugin = "$env:USERPROFILE\.codex\.tmp\bundled-marketplaces\openai-bundled\plugins\chrome\.codex-plugin\plugin.json"
+(Get-Content $msixPlugin -Raw | ConvertFrom-Json).version
+(Get-Content $activePlugin -Raw | ConvertFrom-Json).version
 ```
 
-添加显式 `node_repl` MCP server。必须同时提供匹配的 CLI 与模块目录：
+不要添加显式 `node_repl` MCP server。最新复现证明普通 stdio MCP 会造成“工具可见但可信安全桥缺失”的假成功。
+
+先 dry-run：
 
 ```powershell
-$codexCli = "$env:LOCALAPPDATA\OpenAI\Codex\bin\codex.exe"
-$nodeRepl = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
-$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<当前版本>\bin\node_modules"
-
-codex mcp add node_repl `
-  --env CODEX_CLI_PATH=$codexCli `
-  --env CODEX_HOME="$env:USERPROFILE\.codex" `
-  --env NODE_REPL_NODE_MODULE_DIRS=$mods `
-  -- $nodeRepl
+.\scripts\repair-codex-runtime-skew.ps1
 ```
 
-复验：
+完全退出 Codex、Chrome 和 Edge 后执行：
 
 ```powershell
-codex mcp list
-codex doctor --json
+.\scripts\repair-codex-runtime-skew.ps1 -Apply
 ```
 
 应看到：
 
 ```text
-node_repl enabled
-mcp servers: 1
-MCP configuration is locally consistent
+MSIX 内插件版本 = 活动 marketplace 版本 = 已安装缓存版本
+codex mcp get node_repl 返回未配置外部 server
+Native Host 指向当前版本缓存
 ```
 
 ---
@@ -114,7 +110,7 @@ MCP configuration is locally consistent
 ```text
 当前 turn 的工具表一般不会热加载。
 修复后需要新 turn、新线程或完全重启 Codex 后复测。
-显式 MCP 恢复工具入口，不代表受信任授权桥已经恢复。
+官方 bundled 插件负责提供可信工具；普通外部 MCP 不应作为长期修复。
 ```
 
 复测方式：

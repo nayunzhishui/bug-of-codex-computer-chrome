@@ -90,6 +90,8 @@ if ($null -eq $package) {
 
 $resources = Join-Path $package.InstallLocation 'app\resources'
 $bundledCua = Join-Path $resources 'cua_node'
+$bundledMarketplaceSource = Join-Path $resources 'plugins\openai-bundled'
+$bundledMarketplaceTarget = Join-Path $env:USERPROFILE '.codex\.tmp\bundled-marketplaces\openai-bundled'
 $manifestPath = Join-Path $bundledCua 'manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath)) {
   throw "Missing CUA manifest: $manifestPath"
@@ -104,15 +106,15 @@ $localBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
 $localCodex = Join-Path $localBin 'codex.exe'
 $localNodeRepl = Join-Path $localBin 'node_repl.exe'
 $npmVendorBin = Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin'
-$chromePlugin = Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE '.codex\plugins\cache\openai-bundled\chrome') -Directory -ErrorAction SilentlyContinue |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-$chromeNativeHost = if ($null -eq $chromePlugin) {
-  $null
-} else {
-  Join-Path $chromePlugin.FullName 'extension-host\windows\x64\extension-host.exe'
-}
 $nativeManifestPath = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
+$sourcePluginVersions = @{}
+foreach ($pluginName in @('chrome', 'computer-use')) {
+  $pluginManifestPath = Join-Path $bundledMarketplaceSource "plugins\$pluginName\.codex-plugin\plugin.json"
+  if (-not (Test-Path -LiteralPath $pluginManifestPath)) {
+    throw "Missing bundled plugin manifest: $pluginManifestPath"
+  }
+  $sourcePluginVersions[$pluginName] = (Get-Content -LiteralPath $pluginManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json).version
+}
 
 [pscustomobject]@{
   Apply = [bool]$Apply
@@ -120,44 +122,27 @@ $nativeManifestPath = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.c
   RuntimeVersion = $manifest.runtime_archive_version
   RuntimeSource = $bundledCua
   RuntimeTarget = $runtimeRoot
+  BundledMarketplaceSource = $bundledMarketplaceSource
+  BundledMarketplaceTarget = $bundledMarketplaceTarget
+  ChromePluginVersion = $sourcePluginVersions['chrome']
+  ComputerUsePluginVersion = $sourcePluginVersions['computer-use']
   DesktopBin = $localBin
   NpmVendorBin = $npmVendorBin
 } | Format-List
 
 if (-not $Apply) {
-  Write-Output 'DRY RUN only. Fully exit Codex/ChatGPT, then rerun with -Apply.'
+  Write-Output 'DRY RUN only. Fully exit Codex/ChatGPT, Chrome, and Edge, then rerun with -Apply.'
   return
 }
 
-$chatGptProcesses = @(Get-Process ChatGPT -ErrorAction SilentlyContinue)
-if ($chatGptProcesses.Count -gt 0) {
+$appProcesses = @(Get-Process ChatGPT, Codex, codex, codex-code-mode-host -ErrorAction SilentlyContinue)
+if ($appProcesses.Count -gt 0) {
   throw 'Codex/ChatGPT is still running. Fully exit it before applying this repair.'
 }
 
-if ($null -ne $chromeNativeHost -and (Test-Path -LiteralPath $chromeNativeHost)) {
-  $nativeManifest = if (Test-Path -LiteralPath $nativeManifestPath) {
-    Get-Content -LiteralPath $nativeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  } else {
-    [pscustomobject]@{
-      name = 'com.openai.codexextension'
-      description = 'OpenAI Codex Chrome extension native messaging host'
-      path = $chromeNativeHost
-      type = 'stdio'
-      allowed_origins = @('chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/')
-    }
-  }
-  $nativeManifest.path = $chromeNativeHost
-  $nativeManifestDirectory = Split-Path -Parent $nativeManifestPath
-  New-Item -ItemType Directory -Path $nativeManifestDirectory -Force | Out-Null
-  $nativeManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $nativeManifestPath -Encoding UTF8
-  foreach ($registryPath in @(
-    'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension',
-    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension'
-  )) {
-    New-Item -Path $registryPath -Force | Out-Null
-    Set-Item -LiteralPath $registryPath -Value $nativeManifestPath
-  }
-  Write-Output "refreshed Chrome native host manifest: $chromeNativeHost"
+$browserProcesses = @(Get-Process chrome, msedge -ErrorAction SilentlyContinue)
+if ($browserProcesses.Count -gt 0) {
+  throw 'Chrome or Edge is still running. Fully exit both browsers so the Native Host cannot respawn during repair.'
 }
 
 $processSnapshot = @(Get-CimInstance Win32_Process)
@@ -187,6 +172,13 @@ $runningLocal = @(Get-Process codex, codex-code-mode-host -ErrorAction SilentlyC
 if ($runningLocal.Count -gt 0) {
   throw 'A Codex local runtime is still running after stale native hosts were stopped.'
 }
+
+New-Item -ItemType Directory -Path $bundledMarketplaceTarget -Force | Out-Null
+& robocopy.exe $bundledMarketplaceSource $bundledMarketplaceTarget /E /COPY:DT /DCOPY:T /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
+if ($LASTEXITCODE -ge 8) {
+  throw "Bundled marketplace refresh failed, robocopy exit=$LASTEXITCODE"
+}
+Write-Output "refreshed bundled marketplace from current MSIX: $bundledMarketplaceTarget"
 
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 & robocopy.exe $bundledCua $runtimeRoot /E /COPY:DT /DCOPY:T /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
@@ -224,12 +216,49 @@ if (
   Copy-PlainFile -Source $runtimeNodeRepl -Target $localNodeRepl
 }
 
+# A manually registered stdio node_repl can expose `js` while missing the
+# privileged browser and Computer Use bridge. Remove that legacy workaround so
+# the official bundled plugin can supply the trusted tool surface.
 & $localCodex mcp remove node_repl 2>$null | Out-Null
-& $localCodex mcp add node_repl `
-  --env CODEX_CLI_PATH=$localCodex `
-  --env CODEX_HOME="$env:USERPROFILE\.codex" `
-  --env NODE_REPL_NODE_MODULE_DIRS=$runtimeNodeModules `
-  -- $localNodeRepl | Out-Null
+
+foreach ($pluginName in @('chrome', 'computer-use')) {
+  & $localCodex plugin remove "$pluginName@openai-bundled" --json 2>$null | Out-Null
+  & $localCodex plugin add "$pluginName@openai-bundled" --json | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to install current bundled plugin: $pluginName"
+  }
+  Write-Output "installed $pluginName plugin version $($sourcePluginVersions[$pluginName])"
+}
+
+$chromePluginRoot = Join-Path $env:USERPROFILE ".codex\plugins\cache\openai-bundled\chrome\$($sourcePluginVersions['chrome'])"
+$chromeNativeHost = Join-Path $chromePluginRoot 'extension-host\windows\x64\extension-host.exe'
+if (-not (Test-Path -LiteralPath $chromeNativeHost)) {
+  throw "Current Chrome Native Host was not installed: $chromeNativeHost"
+}
+
+$nativeManifest = if (Test-Path -LiteralPath $nativeManifestPath) {
+  Get-Content -LiteralPath $nativeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+} else {
+  [pscustomobject]@{
+    name = 'com.openai.codexextension'
+    description = 'OpenAI Codex Chrome extension native messaging host'
+    path = $chromeNativeHost
+    type = 'stdio'
+    allowed_origins = @('chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/')
+  }
+}
+$nativeManifest.path = $chromeNativeHost
+$nativeManifestDirectory = Split-Path -Parent $nativeManifestPath
+New-Item -ItemType Directory -Path $nativeManifestDirectory -Force | Out-Null
+$nativeManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $nativeManifestPath -Encoding UTF8
+foreach ($registryPath in @(
+  'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension',
+  'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension'
+)) {
+  New-Item -Path $registryPath -Force | Out-Null
+  Set-Item -LiteralPath $registryPath -Value $nativeManifestPath
+}
+Write-Output "refreshed Chrome native host manifest: $chromeNativeHost"
 
 $configPath = Join-Path $env:USERPROFILE '.codex\config.toml'
 $notifyExecutable = Join-Path $runtimeNodeModules '@oai\sky\bin\windows\codex-computer-use.exe'
@@ -248,5 +277,5 @@ if ((Test-Path -LiteralPath $configPath) -and (Test-Path -LiteralPath $notifyExe
 }
 
 Write-Output (& $localCodex --version)
-Write-Output (& $localCodex mcp get node_repl)
-Write-Output 'Repair applied. Reopen Codex and validate in a new task.'
+Write-Output (& $localCodex plugin list | Select-String 'chrome@openai-bundled|computer-use@openai-bundled')
+Write-Output 'Repair applied. Reopen Codex and validate the official trusted tool in a new task.'
