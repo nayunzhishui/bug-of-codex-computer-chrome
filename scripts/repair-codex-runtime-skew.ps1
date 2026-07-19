@@ -128,16 +128,32 @@ foreach ($pluginName in @('chrome', 'computer-use')) {
   ComputerUsePluginVersion = $sourcePluginVersions['computer-use']
   DesktopBin = $localBin
   NpmVendorBin = $npmVendorBin
-} | Format-List
+} | Format-List | Out-String | Write-Output
 
 if (-not $Apply) {
   Write-Output 'DRY RUN only. Fully exit Codex/ChatGPT and close all Chrome/Edge windows, then rerun with -Apply.'
   return
 }
 
-$appProcesses = @(Get-Process ChatGPT, Codex, codex, codex-code-mode-host -ErrorAction SilentlyContinue)
-if ($appProcesses.Count -gt 0) {
+$desktopProcesses = @(Get-Process ChatGPT -ErrorAction SilentlyContinue)
+if ($desktopProcesses.Count -gt 0) {
   throw 'Codex/ChatGPT is still running. Fully exit it before applying this repair.'
+}
+
+$externalCodexAppServers = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -eq 'codex.exe' -and
+  $_.ExecutablePath -like "$env:USERPROFILE\.vscode\extensions\openai.chatgpt-*\bin\windows-x86_64\codex.exe" -and
+  $_.CommandLine -match '\bapp-server\b'
+})
+foreach ($externalCodexAppServer in $externalCodexAppServers) {
+  Stop-Process -Id $externalCodexAppServer.ProcessId -Force -ErrorAction SilentlyContinue
+  Write-Output "stopped VS Code OpenAI extension app-server pid=$($externalCodexAppServer.ProcessId)"
+}
+
+$localRuntimeProcesses = @(Get-Process codex, codex-code-mode-host -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -like "$localBin*" })
+if ($localRuntimeProcesses.Count -gt 0) {
+  throw 'Codex Desktop local runtime is still running. Fully exit Codex before applying this repair.'
 }
 
 $browserProcesses = @(Get-Process chrome, msedge -ErrorAction SilentlyContinue)

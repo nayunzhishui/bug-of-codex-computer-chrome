@@ -56,12 +56,13 @@ Computer Use requires app approval but elicitations are unavailable
 
 1. 完全退出 Codex/ChatGPT，并关闭所有 Chrome / Edge 窗口。脚本会停止没有窗口的启动增强/后台应用进程，防止其继续拉起旧 Native Host。
 2. 停止已核实属于 Codex Chrome 插件的旧 `extension-host.exe` 进程树。
-3. 从当前 MSIX 刷新活动 `openai-bundled` marketplace。
-4. 删除旧的外部 `node_repl` MCP workaround。
-5. 重新安装当前版本的 Chrome / Computer Use bundled 插件。
-6. 把 Native Host manifest 和 Chrome/Edge 注册表指向新版本插件缓存。
-7. 同步当前 CUA runtime 和 notifier。
-8. 重新打开 Codex，新建任务验证。
+3. 停止已核实属于 VS Code OpenAI 扩展、且仍在运行 `app-server` 的遗留 `codex.exe`；不关闭 VS Code 本身。
+4. 从当前 MSIX 刷新活动 `openai-bundled` marketplace。
+5. 删除旧的外部 `node_repl` MCP workaround。
+6. 重新安装当前版本的 Chrome / Computer Use bundled 插件。
+7. 把 Native Host manifest 和 Chrome/Edge 注册表指向新版本插件缓存。
+8. 同步当前 CUA runtime 和 notifier。
+9. 重新打开 Codex，新建任务验证。
 
 先 dry-run：
 
