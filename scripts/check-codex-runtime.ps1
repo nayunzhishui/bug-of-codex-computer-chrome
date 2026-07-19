@@ -190,6 +190,57 @@ foreach ($nativeProcess in $nativeProcesses) {
 }
 Add-ReportLine
 
+Add-ReportLine '=== Chrome app-server registry ==='
+$appServerRegistryPath = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'
+if (-not (Test-Path -LiteralPath $appServerRegistryPath)) {
+  Add-ReportLine "Registry: MISSING | $appServerRegistryPath"
+} else {
+  $registryItem = Get-Item -LiteralPath $appServerRegistryPath
+  Add-ReportLine "Registry: modified=$($registryItem.LastWriteTime.ToString('o')) | $appServerRegistryPath"
+  try {
+    $appServerRegistry = Get-Content -LiteralPath $appServerRegistryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $entriesProperty = $appServerRegistry.PSObject.Properties['entries']
+    $entries = if ($null -eq $entriesProperty) { @() } else { @($entriesProperty.Value) }
+    $requiredFields = @(
+      'appServerProtocolVersion', 'appVersion', 'channel', 'cliVersion', 'entryId',
+      'extensionBuildChannels', 'extensionIds', 'installId', 'nativeHostNames',
+      'nativeHostProtocolVersion', 'nativeHostVersion', 'paths', 'presence',
+      'proxyHost', 'proxyPort', 'schemaVersion', 'updatedAt'
+    )
+    $compatibleEntries = 0
+    for ($index = 0; $index -lt $entries.Count; $index++) {
+      $entry = $entries[$index]
+      $missingFields = @($requiredFields | Where-Object { $null -eq $entry.PSObject.Properties[$_] })
+      $entryPid = $null
+      $presenceProperty = $entry.PSObject.Properties['presence']
+      if ($null -ne $presenceProperty -and $null -ne $presenceProperty.Value) {
+        $pidProperty = $presenceProperty.Value.PSObject.Properties['pid']
+        if ($null -ne $pidProperty) {
+          $entryPid = [int]$pidProperty.Value
+        }
+      }
+      $pidIsLive = $null -ne $entryPid -and $null -ne (Get-Process -Id $entryPid -ErrorAction SilentlyContinue)
+      $appProtocolProperty = $entry.PSObject.Properties['appServerProtocolVersion']
+      $nativeProtocolProperty = $entry.PSObject.Properties['nativeHostProtocolVersion']
+      $protocolsMatch =
+        $null -ne $appProtocolProperty -and [int]$appProtocolProperty.Value -eq 2 -and
+        $null -ne $nativeProtocolProperty -and [int]$nativeProtocolProperty.Value -eq 2
+      if ($missingFields.Count -eq 0 -and $pidIsLive -and $protocolsMatch) {
+        $compatibleEntries++
+      }
+      Add-ReportLine "Entry[$index]: pid=$entryPid live=$pidIsLive protocolsV2=$protocolsMatch missing=$($missingFields -join ',')"
+    }
+    if ($compatibleEntries -gt 0) {
+      Add-ReportLine "Compatibility: OK ($compatibleEntries compatible live entry/entries)"
+    } else {
+      Add-ReportLine 'Compatibility: FAILED (No compatible Codex app-server entry was found)'
+    }
+  } catch {
+    Add-ReportLine "Compatibility: FAILED (malformed registry: $($_.Exception.Message))"
+  }
+}
+Add-ReportLine
+
 Add-ReportLine '=== Recent session evidence ==='
 $patterns = @(
   'bundled_executable_relocation_failed',

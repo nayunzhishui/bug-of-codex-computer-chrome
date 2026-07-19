@@ -117,6 +117,7 @@ $localCodex = Join-Path $localBin 'codex.exe'
 $localNodeRepl = Join-Path $localBin 'node_repl.exe'
 $npmVendorBin = Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin'
 $nativeManifestPath = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
+$appServerRegistryPath = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\chrome-native-hosts-v2.json'
 $sourcePluginVersions = @{}
 foreach ($pluginName in @('chrome', 'computer-use')) {
   $pluginManifestPath = Join-Path $bundledMarketplaceSource "plugins\$pluginName\.codex-plugin\plugin.json"
@@ -204,6 +205,18 @@ $runningLocal = @(Get-Process codex, codex-code-mode-host -ErrorAction SilentlyC
   Where-Object { $_.Path -like "$localBin*" })
 if ($runningLocal.Count -gt 0) {
   throw 'A Codex local runtime is still running after stale native hosts were stopped.'
+}
+
+# This registry contains live app-server presence, not durable configuration.
+# Older Desktop builds can leave a schema-v2 file whose entry has a dead PID
+# and lacks fields required by the current native host.  Keeping that file
+# makes the side panel report "No compatible Codex app-server entry was found".
+# Archive it only after every related process has stopped; the current Desktop
+# app will then publish a fresh, version-compatible entry at startup.
+if (Test-Path -LiteralPath $appServerRegistryPath) {
+  $registryBackup = "$appServerRegistryPath.bak.$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  Move-Item -LiteralPath $appServerRegistryPath -Destination $registryBackup
+  Write-Output "archived stale Chrome app-server registry: $registryBackup"
 }
 
 New-Item -ItemType Directory -Path $bundledMarketplaceTarget -Force | Out-Null

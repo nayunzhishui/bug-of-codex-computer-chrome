@@ -66,8 +66,9 @@ Computer Use requires app approval but elicitations are unavailable
 6. 删除旧的外部 `node_repl` MCP workaround。
 7. 重新安装当前版本的 Chrome / Computer Use bundled 插件。
 8. 把 Native Host manifest 和 Chrome/Edge 注册表指向新版本插件缓存。
-9. 同步当前 CUA runtime 和 notifier。
-10. 重新打开 Codex，新建任务验证。
+9. 备份 `%LOCALAPPDATA%\OpenAI\Codex\chrome-native-hosts-v2.json`，让新进程重建活跃 app-server 条目。
+10. 同步当前 CUA runtime 和 notifier。
+11. 重新打开 Codex，新建任务验证。
 
 先 dry-run：
 
@@ -87,6 +88,7 @@ Computer Use requires app approval but elicitations are unavailable
 MSIX 内插件版本 = 活动 marketplace 版本 = 已安装缓存版本
 Desktop core alignment 全部为 MATCH
 Native Host path 指向该版本缓存
+Chrome app-server registry 有字段完整、PID 存活、协议为 v2 的条目
 codex mcp get node_repl 返回未配置外部 server
 新任务实际获得官方 node_repl js 工具
 Chrome 能打开明确的 https://example.com
