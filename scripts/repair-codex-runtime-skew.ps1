@@ -131,7 +131,7 @@ foreach ($pluginName in @('chrome', 'computer-use')) {
 } | Format-List
 
 if (-not $Apply) {
-  Write-Output 'DRY RUN only. Fully exit Codex/ChatGPT, Chrome, and Edge, then rerun with -Apply.'
+  Write-Output 'DRY RUN only. Fully exit Codex/ChatGPT and close all Chrome/Edge windows, then rerun with -Apply.'
   return
 }
 
@@ -141,8 +141,15 @@ if ($appProcesses.Count -gt 0) {
 }
 
 $browserProcesses = @(Get-Process chrome, msedge -ErrorAction SilentlyContinue)
+$visibleBrowserProcesses = @($browserProcesses | Where-Object { $_.MainWindowHandle -ne 0 })
+if ($visibleBrowserProcesses.Count -gt 0) {
+  throw 'A Chrome or Edge window is still open. Close all browser windows before applying this repair.'
+}
+foreach ($browserProcess in $browserProcesses) {
+  Stop-Process -Id $browserProcess.Id -Force -ErrorAction SilentlyContinue
+}
 if ($browserProcesses.Count -gt 0) {
-  throw 'Chrome or Edge is still running. Fully exit both browsers so the Native Host cannot respawn during repair.'
+  Write-Output "stopped residual Chrome/Edge background processes: $($browserProcesses.Count)"
 }
 
 $processSnapshot = @(Get-CimInstance Win32_Process)

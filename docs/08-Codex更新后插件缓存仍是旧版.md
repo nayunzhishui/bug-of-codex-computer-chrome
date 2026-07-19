@@ -54,7 +54,7 @@ Computer Use requires app approval but elicitations are unavailable
 
 ## 修复顺序
 
-1. 完全退出 Codex/ChatGPT、Chrome 和 Edge，防止旧进程回写配置或重新拉起 Native Host。
+1. 完全退出 Codex/ChatGPT，并关闭所有 Chrome / Edge 窗口。脚本会停止没有窗口的启动增强/后台应用进程，防止其继续拉起旧 Native Host。
 2. 停止已核实属于 Codex Chrome 插件的旧 `extension-host.exe` 进程树。
 3. 从当前 MSIX 刷新活动 `openai-bundled` marketplace。
 4. 删除旧的外部 `node_repl` MCP workaround。
@@ -69,7 +69,7 @@ Computer Use requires app approval but elicitations are unavailable
 .\scripts\repair-codex-runtime-skew.ps1
 ```
 
-关闭相关应用后执行：
+退出 Codex并关闭浏览器窗口后执行：
 
 ```powershell
 .\scripts\repair-codex-runtime-skew.ps1 -Apply
