@@ -97,8 +97,8 @@ try {
     exit 2
   }
 
-  $desktopMain = Get-DesktopMainProcesses
-  $runtimeProcesses = Get-DesktopRuntimeProcesses
+  $desktopMain = @(Get-DesktopMainProcesses)
+  $runtimeProcesses = @(Get-DesktopRuntimeProcesses)
   if ($desktopMain.Count -gt 0 -or $runtimeProcesses.Count -gt 0) {
     $desktopPids = @($desktopMain | ForEach-Object { $_.ProcessId }) -join ','
     $runtimePids = @($runtimeProcesses | ForEach-Object { $_.Id }) -join ','
