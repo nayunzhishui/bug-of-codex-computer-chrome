@@ -29,14 +29,16 @@ OpenAI 账号或订阅权限问题
 
 ## 2. 最终结论
 
-复盘后确认，这不是一个单点故障，而是可能连续出现的五层故障链：
+复盘后确认，这不是一个单点故障，而是可能连续出现的七层故障链：
 
 ```text
 1. openai-bundled / Chrome Native Host 没有加载或注册
 2. 当前线程没有注入 mcp__node_repl__js
 3. Desktop 本地 codex.exe 低于已安装 CLI，旧进程继续创建新线程
-4. node_repl.exe 与 cua_node/node_modules 不属于同一运行时版本
-5. Computer Use 需要逐应用授权，但 createElicitation/nativePipe 授权桥没有注入
+4. 浏览器遗留的 extension-host/app-server 跨重启存活并覆盖 config.toml
+5. node_repl.exe 与 cua_node/node_modules 不属于同一运行时版本
+6. Google Chrome 实际未运行，仅 Edge 在运行，导致 extension 后端不可用
+7. Computer Use 需要逐应用授权，但 createElicitation/nativePipe 授权桥没有注入
 ```
 
 早期故障确实来自 MSIX 本地运行时迁移失败，导致多个 helper 缺失或路径错误：
@@ -60,11 +62,14 @@ Computer Use requires app approval but elicitations are unavailable
 
 Chrome 显示 `Connected`、能够读取标签页，但导航被安全层拦截，是另一类问题。先用用户明确给出的完整 URL 复测，不要把安全策略误判为扩展断连，也不要修改代码绕过浏览器安全层。
 
+路由边界：`@chrome` 只控制 Google Chrome；Edge 可由 Computer Use 控制，通用网页也可使用内置 Browser。用户只要求“能控制浏览器”时，可在这三条路径中选择可用的一条，但不能把 Edge 的 Native Host 进程误判成 Chrome 后端已就绪。
+
 最终成功标志应分开验证：
 
 ```text
 新线程 session_meta.cli_version 与本地 CLI 一致
 mcp__node_repl__js 实际启动
+Google Chrome 已运行，Native Host 使用当前插件缓存路径
 Chrome 能打开用户明确提供的 https://example.com 并读取标题
 Computer Use 能正常显示授权弹窗，或使用已经持久批准的应用
 不再出现 elicitations are unavailable

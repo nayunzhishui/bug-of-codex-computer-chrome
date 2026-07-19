@@ -81,6 +81,47 @@ if (Test-Path -LiteralPath $localCodex) {
 }
 Add-ReportLine
 
+Add-ReportLine '=== Chrome native host and browser state ==='
+$configPath = Join-Path $env:USERPROFILE '.codex\config.toml'
+if (Test-Path -LiteralPath $configPath) {
+  $configItem = Get-Item -LiteralPath $configPath
+  Add-ReportLine "config.toml: created=$($configItem.CreationTime.ToString('o')) modified=$($configItem.LastWriteTime.ToString('o'))"
+  $configMatches = Select-String -LiteralPath $configPath -Pattern '^notify|^\[mcp_servers\.node_repl\]|NODE_REPL_NODE_MODULE_DIRS' -ErrorAction SilentlyContinue
+  foreach ($match in $configMatches) {
+    Add-ReportLine "config.toml:$($match.LineNumber): $($match.Line)"
+  }
+} else {
+  Add-ReportLine "config.toml: MISSING | $configPath"
+}
+
+$nativeManifestPath = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
+if (Test-Path -LiteralPath $nativeManifestPath) {
+  $nativeManifest = Get-Content -LiteralPath $nativeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Add-ReportLine "Native manifest: $nativeManifestPath"
+  Add-ReportLine "Native host path: $($nativeManifest.path)"
+} else {
+  Add-ReportLine "Native manifest: MISSING | $nativeManifestPath"
+}
+foreach ($registryPath in @(
+  'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension',
+  'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension'
+)) {
+  if (Test-Path -LiteralPath $registryPath) {
+    Add-ReportLine "Registry $registryPath = $((Get-Item -LiteralPath $registryPath).GetValue(''))"
+  } else {
+    Add-ReportLine "Registry MISSING: $registryPath"
+  }
+}
+$chromeProcesses = @(Get-Process chrome -ErrorAction SilentlyContinue)
+Add-ReportLine "Google Chrome running: $($chromeProcesses.Count -gt 0)"
+$nativeProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.Name -eq 'extension-host.exe' -and $_.ExecutablePath -like '*openai-bundled*chrome*extension-host.exe'
+})
+foreach ($nativeProcess in $nativeProcesses) {
+  Add-ReportLine "Native host pid=$($nativeProcess.ProcessId) parent=$($nativeProcess.ParentProcessId) started=$($nativeProcess.CreationDate) path=$($nativeProcess.ExecutablePath)"
+}
+Add-ReportLine
+
 Add-ReportLine '=== Recent session evidence ==='
 $patterns = @(
   'bundled_executable_relocation_failed',
@@ -89,6 +130,8 @@ $patterns = @(
   'browser_use_setup_failed',
   'mcp__node_repl__js',
   'mcp: node_repl/js started',
+  'Browser is not available: extension',
+  'TypeError: tools.mcp__node_repl__js is not a function',
   'Computer Use requires app approval but elicitations are unavailable',
   'Computer Use app approval UI is unavailable outside trusted node_repl',
   '无法连接 Chrome 控制组件',

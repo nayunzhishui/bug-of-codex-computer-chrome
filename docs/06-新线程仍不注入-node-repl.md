@@ -10,7 +10,7 @@ Chrome 扩展侧不再提示 manifest missing
 但 @chrome 仍回复：无法连接 Chrome 控制组件
 ```
 
-这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建，导致 `node_repl` 没有进入该线程工具表。
+这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建，或 `config.toml` 在重启后被旧进程快照覆盖，导致 `node_repl` 没有进入该线程工具表。
 
 ---
 
@@ -49,6 +49,18 @@ ALL_TOOLS 中没有 mcp__node_repl__js
 最终返回“无法连接 Chrome 控制组件”
 ```
 
+另一个已复现链路是：
+
+```text
+Codex Desktop 已重启，cli_version 也已更新
+但浏览器留下了数日前启动的 extension-host.exe
+该宿主继续持有旧 codex app-server 子进程和旧 .tmp 插件路径
+config.toml 随后被旧快照重写，显式 node_repl MCP 消失
+新任务调用 tools.mcp__node_repl__js 时得到 TypeError: ... is not a function
+```
+
+应用重启不等于浏览器 Native Messaging Host 重启。Chrome 或 Edge 仍在运行时，旧 `extension-host.exe` 可以跨越多次 Codex 重启继续存活。
+
 ---
 
 ## 根因判断
@@ -74,6 +86,25 @@ codex --version
 ---
 
 ## 修复方向
+
+### 0. 先排除旧 Native Host 和配置回写
+
+先完全退出 Codex/ChatGPT。随后检查 Native Host 的启动时间、父进程和路径：
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -in @('extension-host.exe', 'codex.exe') } |
+  Select-Object ProcessId, ParentProcessId, CreationDate, ExecutablePath, CommandLine
+```
+
+如果 `extension-host.exe` 明显早于本次应用启动，或路径仍指向 `.codex\.tmp\bundled-marketplaces`，先停止已核实的旧宿主进程链，再写入 MCP 配置。不要先写配置再退出旧进程，否则旧进程仍可能把 `config.toml` 覆盖回去。
+
+仓库脚本的 `-Apply` 流程会在确认 ChatGPT 已退出后：
+
+1. 把 Native Host 清单切到当前插件缓存的稳定路径；
+2. 停止已核实属于 Codex Chrome 插件的旧宿主及其子进程；
+3. 同步当前 MSIX 的 CLI、`node_repl` 和 CUA runtime；
+4. 最后写入 `node_repl` MCP 和当前版本的 Computer Use notifier。
 
 ### 1. 恢复显式 node_repl MCP
 
@@ -142,7 +173,7 @@ WindowsApps 源文件带特殊属性时，普通复制可能出现错误 6000。
 
 ## 复验
 
-重启 Codex 后，新建线程运行：
+重启 Codex 并启动 Google Chrome 后，新建任务运行：
 
 ```text
 @chrome 打开 https://example.com
@@ -162,6 +193,16 @@ cli_version 不再是旧版
 出现 mcp: node_repl/js started
 不再出现“无法连接 Chrome 控制组件”
 ```
+
+必须使用全新任务。旧任务的工具表不会在重试按钮或新 turn 中热注入。
+
+如果 `mcp: node_repl/js started` 已出现，但报错变成：
+
+```text
+Browser is not available: extension
+```
+
+说明工具注入已经恢复，下一层是 Chrome 后端未注册。若继续使用 `@chrome`，必须检查 Google Chrome 是否实际运行；只运行 Edge 不会注册 Chrome 插件所需的 `extension` 后端。若用户接受 Edge，则改走 Computer Use 或内置 Browser，不要让 `@chrome` 假装已经控制 Edge。
 
 如果 `node_repl/js` 已启动，但 Computer Use 仍报授权弹窗不可用，说明工具注入已修复、授权桥尚未修复，应继续检查 `node_repl` 与 CUA runtime 是否同版本。
 

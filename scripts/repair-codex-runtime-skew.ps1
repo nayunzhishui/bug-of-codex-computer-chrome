@@ -62,6 +62,25 @@ function Copy-PlainFile {
   Write-Output "backup $backup"
 }
 
+function Get-DescendantProcessIds {
+  param(
+    [Parameter(Mandatory)][int]$ParentId,
+    [Parameter(Mandatory)][object[]]$Processes
+  )
+
+  $result = [Collections.Generic.List[int]]::new()
+  $pending = [Collections.Generic.Queue[int]]::new()
+  $pending.Enqueue($ParentId)
+  while ($pending.Count -gt 0) {
+    $current = $pending.Dequeue()
+    foreach ($child in $Processes | Where-Object { $_.ParentProcessId -eq $current }) {
+      $result.Add([int]$child.ProcessId)
+      $pending.Enqueue([int]$child.ProcessId)
+    }
+  }
+  return $result.ToArray()
+}
+
 $package = Get-AppxPackage -Name OpenAI.Codex |
   Sort-Object Version -Descending |
   Select-Object -First 1
@@ -85,6 +104,15 @@ $localBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
 $localCodex = Join-Path $localBin 'codex.exe'
 $localNodeRepl = Join-Path $localBin 'node_repl.exe'
 $npmVendorBin = Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin'
+$chromePlugin = Get-ChildItem -LiteralPath (Join-Path $env:USERPROFILE '.codex\plugins\cache\openai-bundled\chrome') -Directory -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+$chromeNativeHost = if ($null -eq $chromePlugin) {
+  $null
+} else {
+  Join-Path $chromePlugin.FullName 'extension-host\windows\x64\extension-host.exe'
+}
+$nativeManifestPath = Join-Path $env:LOCALAPPDATA 'OpenAI\extension\com.openai.codexextension.json'
 
 [pscustomobject]@{
   Apply = [bool]$Apply
@@ -101,12 +129,63 @@ if (-not $Apply) {
   return
 }
 
-$running = @()
-$running += Get-Process ChatGPT -ErrorAction SilentlyContinue
-$running += Get-Process codex, codex-code-mode-host -ErrorAction SilentlyContinue |
-  Where-Object { $_.Path -like "$localBin*" }
-if (($running | Measure-Object).Count -gt 0) {
+$chatGptProcesses = @(Get-Process ChatGPT -ErrorAction SilentlyContinue)
+if ($chatGptProcesses.Count -gt 0) {
   throw 'Codex/ChatGPT is still running. Fully exit it before applying this repair.'
+}
+
+if ($null -ne $chromeNativeHost -and (Test-Path -LiteralPath $chromeNativeHost)) {
+  $nativeManifest = if (Test-Path -LiteralPath $nativeManifestPath) {
+    Get-Content -LiteralPath $nativeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  } else {
+    [pscustomobject]@{
+      name = 'com.openai.codexextension'
+      description = 'OpenAI Codex Chrome extension native messaging host'
+      path = $chromeNativeHost
+      type = 'stdio'
+      allowed_origins = @('chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/')
+    }
+  }
+  $nativeManifest.path = $chromeNativeHost
+  $nativeManifestDirectory = Split-Path -Parent $nativeManifestPath
+  New-Item -ItemType Directory -Path $nativeManifestDirectory -Force | Out-Null
+  $nativeManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $nativeManifestPath -Encoding UTF8
+  foreach ($registryPath in @(
+    'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension',
+    'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.openai.codexextension'
+  )) {
+    New-Item -Path $registryPath -Force | Out-Null
+    Set-Item -LiteralPath $registryPath -Value $nativeManifestPath
+  }
+  Write-Output "refreshed Chrome native host manifest: $chromeNativeHost"
+}
+
+$processSnapshot = @(Get-CimInstance Win32_Process)
+$staleHosts = @($processSnapshot | Where-Object {
+  $_.Name -eq 'extension-host.exe' -and
+  $_.ExecutablePath -like "$env:USERPROFILE\.codex\*openai-bundled*chrome*extension-host.exe"
+})
+foreach ($hostProcess in $staleHosts) {
+  $descendants = @(Get-DescendantProcessIds -ParentId $hostProcess.ProcessId -Processes $processSnapshot)
+  foreach ($processId in ($descendants | Sort-Object -Descending)) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
+  Stop-Process -Id $hostProcess.ProcessId -Force -ErrorAction SilentlyContinue
+  $parent = $processSnapshot | Where-Object {
+    $_.ProcessId -eq $hostProcess.ParentProcessId -and
+    $_.Name -eq 'cmd.exe' -and
+    $_.CommandLine -match 'chrome\.nativeMessaging'
+  }
+  if ($null -ne $parent) {
+    Stop-Process -Id $parent.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  Write-Output "stopped stale Chrome native host pid=$($hostProcess.ProcessId)"
+}
+
+$runningLocal = @(Get-Process codex, codex-code-mode-host -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -like "$localBin*" })
+if ($runningLocal.Count -gt 0) {
+  throw 'A Codex local runtime is still running after stale native hosts were stopped.'
 }
 
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
@@ -151,6 +230,22 @@ if (
   --env CODEX_HOME="$env:USERPROFILE\.codex" `
   --env NODE_REPL_NODE_MODULE_DIRS=$runtimeNodeModules `
   -- $localNodeRepl | Out-Null
+
+$configPath = Join-Path $env:USERPROFILE '.codex\config.toml'
+$notifyExecutable = Join-Path $runtimeNodeModules '@oai\sky\bin\windows\codex-computer-use.exe'
+if ((Test-Path -LiteralPath $configPath) -and (Test-Path -LiteralPath $notifyExecutable)) {
+  $configText = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8
+  $notifyLine = "notify = [ '$notifyExecutable', 'turn-ended' ]"
+  $updatedConfig = if ($configText -match '(?m)^notify\s*=.*$') {
+    [regex]::Replace($configText, '(?m)^notify\s*=.*$', $notifyLine, 1)
+  } else {
+    $notifyLine + [Environment]::NewLine + $configText
+  }
+  if ($updatedConfig -ne $configText) {
+    Set-Content -LiteralPath $configPath -Value $updatedConfig -NoNewline -Encoding UTF8
+    Write-Output "refreshed Computer Use notifier: $notifyExecutable"
+  }
+}
 
 Write-Output (& $localCodex --version)
 Write-Output (& $localCodex mcp get node_repl)
