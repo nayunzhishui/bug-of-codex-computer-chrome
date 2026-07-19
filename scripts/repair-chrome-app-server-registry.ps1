@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [switch]$InspectOnly,
+  [switch]$ForceStopCodex,
   [ValidateRange(30, 600)][int]$TimeoutSeconds = 180
 )
 
@@ -43,6 +44,37 @@ function Get-DesktopRuntimeProcesses {
     Get-Process codex, codex-code-mode-host -ErrorAction SilentlyContinue |
       Where-Object { $_.Path -like "$localBin*" }
   )
+}
+
+function Stop-CodexDesktop {
+  $appProcesses = @(
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Name -eq 'ChatGPT.exe' -and
+        $_.ExecutablePath -like 'C:\Program Files\WindowsApps\OpenAI.Codex_*\app\ChatGPT.exe'
+      }
+  )
+  $runtimeProcesses = @(Get-DesktopRuntimeProcesses)
+  $processIds = @(
+    @($runtimeProcesses | ForEach-Object { [int]$_.Id }) +
+    @($appProcesses | ForEach-Object { [int]$_.ProcessId })
+  ) | Select-Object -Unique
+
+  foreach ($processId in $processIds) {
+    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+  }
+
+  $deadline = (Get-Date).AddSeconds(20)
+  do {
+    Start-Sleep -Milliseconds 500
+    $desktopMain = @(Get-DesktopMainProcesses)
+    $runtimeProcesses = @(Get-DesktopRuntimeProcesses)
+    if ($desktopMain.Count -eq 0 -and $runtimeProcesses.Count -eq 0) {
+      return
+    }
+  } while ((Get-Date) -lt $deadline)
+
+  throw 'Codex processes did not exit within 20 seconds'
 }
 
 function Get-CompatibleEntry {
@@ -100,12 +132,17 @@ try {
   $desktopMain = @(Get-DesktopMainProcesses)
   $runtimeProcesses = @(Get-DesktopRuntimeProcesses)
   if ($desktopMain.Count -gt 0 -or $runtimeProcesses.Count -gt 0) {
-    $desktopPids = @($desktopMain | ForEach-Object { $_.ProcessId }) -join ','
-    $runtimePids = @($runtimeProcesses | ForEach-Object { $_.Id }) -join ','
-    Write-Report "FAILED Codex is still running desktopPids=$desktopPids runtimePids=$runtimePids"
-    Write-Report 'Use the system-tray Codex icon and choose Exit, then run this file again.'
-    Save-Report
-    exit 3
+    if (-not $ForceStopCodex) {
+      $desktopPids = @($desktopMain | ForEach-Object { $_.ProcessId }) -join ','
+      $runtimePids = @($runtimeProcesses | ForEach-Object { $_.Id }) -join ','
+      Write-Report "FAILED Codex is still running desktopPids=$desktopPids runtimePids=$runtimePids"
+      Write-Report 'Use the system-tray Codex icon and choose Exit, then run this file again.'
+      Save-Report
+      exit 3
+    }
+    Write-Report 'stopping Codex Desktop and its local runtime'
+    Stop-CodexDesktop
+    Write-Report 'Codex processes stopped'
   }
 
   New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
