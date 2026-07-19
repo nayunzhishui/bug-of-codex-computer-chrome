@@ -12,6 +12,21 @@ function Add-ReportLine {
   Add-Content -LiteralPath $OutFile -Value $Text -Encoding UTF8
 }
 
+function Get-Sha256 {
+  param([Parameter(Mandatory)][string]$Path)
+  $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+      (($sha256.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '').ToUpperInvariant()
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 function Add-FileEvidence {
   param(
     [Parameter(Mandatory)][string]$Label,
@@ -22,7 +37,7 @@ function Add-FileEvidence {
     return
   }
   $item = Get-Item -LiteralPath $Path
-  $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+  $hash = Get-Sha256 -Path $Path
   Add-ReportLine "${Label}: length=$($item.Length) sha256=$hash | $Path"
 }
 

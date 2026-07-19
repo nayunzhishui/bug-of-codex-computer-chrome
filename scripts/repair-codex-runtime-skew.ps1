@@ -7,7 +7,17 @@ $ErrorActionPreference = 'Stop'
 
 function Get-Sha256 {
   param([Parameter(Mandatory)][string]$Path)
-  (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+  $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  try {
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+      (($sha256.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '').ToUpperInvariant()
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
 }
 
 function Copy-PlainFile {
