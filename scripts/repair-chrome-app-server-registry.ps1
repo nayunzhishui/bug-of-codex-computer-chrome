@@ -82,6 +82,16 @@ function Get-CompatibleEntry {
     return $null
   }
 
+  $registryBytes = [IO.File]::ReadAllBytes($registryPath)
+  if (
+    $registryBytes.Length -ge 3 -and
+    $registryBytes[0] -eq 0xEF -and
+    $registryBytes[1] -eq 0xBB -and
+    $registryBytes[2] -eq 0xBF
+  ) {
+    return $null
+  }
+
   $document = Get-Content -LiteralPath $registryPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $entriesProperty = $document.PSObject.Properties['entries']
   if ($null -eq $entriesProperty) {

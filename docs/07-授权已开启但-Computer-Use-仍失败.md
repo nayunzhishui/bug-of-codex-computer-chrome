@@ -40,6 +40,8 @@ nodeRepl.nativePipe
 
 Computer Use helper 收到应用审批请求后找不到 `createElicitation`，于是准确报出 `elicitations are unavailable`。
 
+后续版本还确认：不要把 `nodeRepl.nativePipe` 直接属性是否存在当作唯一判断。官方 Computer Use wrapper 可能通过内部 transport 正常工作，而该属性仍为 `undefined`。最终必须实际调用官方 `sky.list_apps()` 或执行一次受控应用操作。
+
 ---
 
 ## 排查顺序
@@ -157,3 +159,5 @@ codex mcp get node_repl
 ```
 
 修复的目标是恢复授权界面和可信运行时，而不是取消授权。
+
+如果日志同时出现 `UNKNOWN errno=-4094`、`missingHelperPath` 或 `missingTransportModulePath`，问题已下沉到 WindowsApps EFS/内容哈希 runtime 层，请改看 [09-2026-07-20 完整修复时间线与文件映射](09-2026-07-20-完整修复时间线与文件映射.md)。

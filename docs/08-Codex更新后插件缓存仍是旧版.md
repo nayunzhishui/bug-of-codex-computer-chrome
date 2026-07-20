@@ -39,6 +39,8 @@ Computer Use requires app approval but elicitations are unavailable
 
 本次继续定位到另一种会产生相同表象的版本错配：修复脚本曾优先把 npm 安装目录中的 `codex.exe` 与 `codex-code-mode-host.exe` 复制到 Desktop bin。即使两边都显示同一个 CLI 版本，二进制 SHA-256 仍不同。结果是插件技能和执行工具一度可见，但 Desktop 专用的可信安全桥没有正确注入。
 
+最后还确认了更深一层：WindowsApps bundled resources 带 EFS 属性，Node 普通复制可能返回 `UNKNOWN errno=-4094`。Desktop 查找的是由当前文件内容计算出的哈希目录，不是 UI 展示版本或 manifest tag 目录；目标目录未预热时会继续出现 `missingHelperPath`、`missingTransportModulePath` 和 Sky runtime unavailable。
+
 ## 排查顺序
 
 1. 用 `Get-AppxPackage OpenAI.Codex` 找到当前 MSIX。
@@ -49,6 +51,8 @@ Computer Use requires app approval but elicitations are unavailable
 6. 执行 `codex mcp get node_repl`，确认是否还存在旧的外部 workaround。
 7. 比较当前 MSIX `app\resources` 与 `%LOCALAPPDATA%\OpenAI\Codex\bin` 中 `codex.exe`、`codex-code-mode-host.exe` 的 SHA-256。
 8. 最后查对应任务日志，而不是只看 UI 提示。
+9. 搜索 `bundled_executable_relocation_failed|errno=-4094|missingHelperPath|missingTransportModulePath`。
+10. 检查当前 MSIX 对应的内容哈希 Codex/CUA 目录和解密 bundled mirror 是否存在。
 
 仓库的诊断脚本会输出上述版本：
 
@@ -69,6 +73,16 @@ Computer Use requires app approval but elicitations are unavailable
 9. 备份 `%LOCALAPPDATA%\OpenAI\Codex\chrome-native-hosts-v2.json`，让新进程重建活跃 app-server 条目。
 10. 同步当前 CUA runtime 和 notifier。
 11. 重新打开 Codex，新建任务验证。
+
+若命中 EFS/内容哈希错误，优先使用更窄的修复：
+
+```powershell
+.\scripts\prewarm-codex-windowsapps-runtime.ps1 -InspectOnly
+.\scripts\prewarm-codex-windowsapps-runtime.ps1
+.\scripts\prewarm-codex-windowsapps-runtime.ps1 -InspectOnly
+```
+
+该脚本只接受与当前 MSIX SHA-256 相同的本地源，并调用 `repair-codex-bundled-marketplace-efs.ps1` 建立当前版本解密镜像。Codex 每次更新后都应重新运行 `-InspectOnly`，不能复用上一版本目录。
 
 先 dry-run：
 
@@ -93,6 +107,7 @@ codex mcp get node_repl 返回未配置外部 server
 新任务实际获得官方 node_repl js 工具
 Chrome 能打开明确的 https://example.com
 Computer Use 需要授权时能显示正常审批界面
+Computer Use 官方客户端实际执行 sky.list_apps() 并返回应用
 不再出现 outside node repl / elicitations are unavailable
 ```
 
