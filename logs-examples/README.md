@@ -12,6 +12,12 @@ browser_use_setup_failed
 codex-windows-sandbox-setup.exe missing
 codex-command-runner.exe missing
 SUCCESS; SAFE_TO_REOPEN_CODEX
+Computer Use requires app approval but elicitations are unavailable
+Computer Use app approval UI is unavailable outside trusted node_repl
+session_meta.cli_version=<version>
+mcp: node_repl/js started
+node_repl_archive_path=<version>/node_repl-<version>-x86_64-pc-windows-msvc.zip
+runtime_archive_version=<version>
 ```
 
 本次案例关键结果：
@@ -24,6 +30,16 @@ RgFingerprint: ada252862d154cdd
 CuaFingerprint: 1b23c930bdf84ed6
 Chrome 成功打开 openai.com
 页面标题：OpenAI | Research & Deployment
+```
+
+后续复发的脱敏结论：
+
+```text
+Desktop local CLI < installed CLI
+Local node_repl SHA-256 != current MSIX node_repl SHA-256
+Tool entry restored, but trusted approval bridge unavailable
+Fix: synchronize CLI + node_repl + CUA node_modules from matching versions
+Chrome Connected + safety navigation blocked != extension disconnected
 ```
 
 隐私处理规则：

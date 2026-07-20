@@ -10,7 +10,7 @@ Chrome 扩展侧不再提示 manifest missing
 但 @chrome 仍回复：无法连接 Chrome 控制组件
 ```
 
-这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建，导致 `node_repl` 没有进入该线程工具表。
+这类问题比“旧线程不热加载”更深一层：不是旧 turn 没刷新，而是新线程启动时仍由旧桌面运行时创建、活动 bundled marketplace 仍是旧版，或配置被旧进程快照覆盖，导致官方可信工具没有进入该线程工具表。
 
 ---
 
@@ -49,6 +49,18 @@ ALL_TOOLS 中没有 mcp__node_repl__js
 最终返回“无法连接 Chrome 控制组件”
 ```
 
+另一个已复现链路是：
+
+```text
+Codex Desktop 已重启，cli_version 也已更新
+但浏览器留下了数日前启动的 extension-host.exe
+该宿主继续持有旧 codex app-server 子进程和旧 .tmp 插件路径
+config.toml 随后被旧快照重写，显式 node_repl MCP 消失
+新任务调用 tools.mcp__node_repl__js 时得到 TypeError: ... is not a function
+```
+
+应用重启不等于浏览器 Native Messaging Host 重启。Chrome 或 Edge 仍在运行时，旧 `extension-host.exe` 可以跨越多次 Codex 重启继续存活。
+
 ---
 
 ## 根因判断
@@ -69,28 +81,46 @@ codex --version
 
 则说明 Codex Desktop 仍在使用旧内置运行时。即使 `codex plugin list` 显示插件 enabled，新线程仍可能用旧工具注入逻辑启动。
 
+还要继续检查当前 MSIX 的 `cua_node\manifest.json`。即使 CLI 已更新，顶层 `node_repl.exe` 仍可能是旧文件，而 `NODE_REPL_NODE_MODULE_DIRS` 指向另一套旧 runtime。这会形成“工具已出现但授权桥仍失败”的下一层问题。
+
 ---
 
 ## 修复方向
 
-### 1. 恢复显式 node_repl MCP
+### 0. 先排除旧 Native Host 和配置回写
+
+先完全退出 Codex/ChatGPT。随后检查 Native Host 的启动时间、父进程和路径：
 
 ```powershell
-$codexCli = "$env:APPDATA\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe"
-$nodeRepl = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node_repl.exe"
-$mods = "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\<CuaFingerprint>\bin\node_modules"
-
-codex mcp remove node_repl
-codex mcp add node_repl `
-  --env CODEX_CLI_PATH=$codexCli `
-  --env CODEX_HOME="$env:USERPROFILE\.codex" `
-  --env NODE_REPL_NODE_MODULE_DIRS=$mods `
-  -- $nodeRepl
-
-codex mcp get node_repl
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -in @('extension-host.exe', 'codex.exe') } |
+  Select-Object ProcessId, ParentProcessId, CreationDate, ExecutablePath, CommandLine
 ```
 
-`<CuaFingerprint>` 必须从本机最新 runtime 目录读取，不要复用旧值。
+如果 `extension-host.exe` 明显早于本次应用启动，或路径仍指向 `.codex\.tmp\bundled-marketplaces`，先停止已核实的旧宿主进程链，再写入 MCP 配置。不要先写配置再退出旧进程，否则旧进程仍可能把 `config.toml` 覆盖回去。
+
+仓库脚本的 `-Apply` 流程会在确认 Codex、Chrome 和 Edge 已退出后：
+
+1. 停止已核实属于 Codex Chrome 插件的旧宿主及其子进程；
+2. 从当前 MSIX 刷新 bundled marketplace；
+3. 同步当前 MSIX 的 CLI、`node_repl` 和 CUA runtime；
+4. 删除会遮蔽可信上下文的旧外部 `node_repl` MCP；
+5. 重装当前版本 Chrome / Computer Use 插件；
+6. 最后把 Native Host 和 notifier 指向当前版本。
+
+### 1. 比较并刷新 bundled 插件版本
+
+```powershell
+$package = Get-AppxPackage OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
+$msixPlugin = Join-Path $package.InstallLocation 'app\resources\plugins\openai-bundled\plugins\chrome\.codex-plugin\plugin.json'
+$activePlugin = "$env:USERPROFILE\.codex\.tmp\bundled-marketplaces\openai-bundled\plugins\chrome\.codex-plugin\plugin.json"
+(Get-Content $msixPlugin -Raw | ConvertFrom-Json).version
+(Get-Content $activePlugin -Raw | ConvertFrom-Json).version
+```
+
+两者不同就属于已确认故障。使用仓库 repair 脚本刷新，不要手工添加普通外部 `node_repl` MCP。
+
+注意：显式 MCP 只证明工具入口可以被发现。出现 `Browser security unavailable outside node repl` 或 `elicitations are unavailable` 时，应删除该 workaround，并转到 `08-Codex更新后插件缓存仍是旧版.md`。
 
 ---
 
@@ -125,11 +155,20 @@ codex-windows-sandbox-setup.exe
 必须完全退出 ChatGPT.exe、codex.exe、codex-code-mode-host.exe 后再复制。
 ```
 
+推荐先 dry-run，再使用仓库脚本同步 CLI 和匹配的 CUA 运行时：
+
+```powershell
+.\scripts\repair-codex-runtime-skew.ps1
+.\scripts\repair-codex-runtime-skew.ps1 -Apply
+```
+
+WindowsApps 源文件带特殊属性时，普通复制可能出现错误 6000。脚本只复制数据和时间戳，不继承加密属性。
+
 ---
 
 ## 复验
 
-重启 Codex 后，新建线程运行：
+重启 Codex 并启动 Google Chrome 后，新建任务运行：
 
 ```text
 @chrome 打开 https://example.com
@@ -149,6 +188,18 @@ cli_version 不再是旧版
 出现 mcp: node_repl/js started
 不再出现“无法连接 Chrome 控制组件”
 ```
+
+必须使用全新任务。旧任务的工具表不会在重试按钮或新 turn 中热注入。
+
+如果 `mcp: node_repl/js started` 已出现，但报错变成：
+
+```text
+Browser is not available: extension
+```
+
+说明工具注入已经恢复，下一层是 Chrome 后端未注册。若继续使用 `@chrome`，必须检查 Google Chrome 是否实际运行；只运行 Edge 不会注册 Chrome 插件所需的 `extension` 后端。若用户接受 Edge，则改走 Computer Use 或内置 Browser，不要让 `@chrome` 假装已经控制 Edge。
+
+如果 `node_repl/js` 已启动，但 Computer Use 仍报授权弹窗不可用，说明工具注入已修复、授权桥尚未修复，应继续检查 `node_repl` 与 CUA runtime 是否同版本。
 
 ---
 
